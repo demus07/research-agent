@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Autonomous Research Agent</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --accent-dim: #1f4b8e;
+      --text: #c9d1d9;
+      --text-dim: #8b949e;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d29922;
+      --radius: 8px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 16px 80px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 36px;
+    }
+
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.5px;
+    }
+
+    header p {
+      color: var(--text-dim);
+      margin-top: 8px;
+      font-size: 0.95rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      width: 100%;
+      max-width: 780px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    #query-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 1rem;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    #query-input:focus {
+      border-color: var(--accent);
+    }
+
+    #query-input::placeholder { color: var(--text-dim); }
+
+    #research-btn {
+      background: var(--accent);
+      color: #0d1117;
+      border: none;
+      border-radius: var(--radius);
+      padding: 10px 22px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+
+    #research-btn:hover { opacity: 0.85; }
+    #research-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    #progress-section { margin-top: 24px; display: none; }
+
+    #progress-section h3 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+
+    #log {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+      font-size: 0.82rem;
+      line-height: 1.7;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+
+    .log-line { display: flex; align-items: flex-start; gap: 8px; }
+    .log-icon { flex-shrink: 0; }
+    .log-line.done .log-icon::before { content: "✓"; color: var(--green); }
+    .log-line.error .log-icon::before { content: "✗"; color: var(--red); }
+    .log-line.info .log-icon::before { content: "›"; color: var(--accent); }
+    .log-line.running .log-icon::before { content: "⋯"; color: var(--yellow); }
+
+    #subquestions-section { margin-top: 18px; display: none; }
+
+    #subquestions-section h3 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+    }
+
+    #subquestions-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .subq-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 12px;
+      font-size: 0.88rem;
+    }
+
+    .subq-item .subq-num {
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 0.8rem;
+      min-width: 20px;
+    }
+
+    .subq-item .subq-status {
+      margin-left: auto;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    .subq-item.researching .subq-status { color: var(--yellow); }
+    .subq-item.done .subq-status { color: var(--green); }
+
+    #result-section { margin-top: 24px; display: none; }
+
+    #result-section h3 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+    }
+
+    .download-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .dl-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: var(--radius);
+      font-size: 0.88rem;
+      font-weight: 600;
+      text-decoration: none;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .dl-btn.md {
+      background: #1f2d1f;
+      color: var(--green);
+      border-color: #2d4a2d;
+    }
+
+    .dl-btn.pdf {
+      background: #1f1a2d;
+      color: #9d8fec;
+      border-color: #3d2d6a;
+    }
+
+    .dl-btn:hover { opacity: 0.8; }
+
+    #markdown-preview {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px 28px;
+      max-height: 600px;
+      overflow-y: auto;
+      font-size: 0.9rem;
+      line-height: 1.75;
+    }
+
+    /* Markdown styles inside preview */
+    #markdown-preview h1 { font-size: 1.5rem; color: #fff; margin: 0 0 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    #markdown-preview h2 { font-size: 1.15rem; color: var(--accent); margin: 24px 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+    #markdown-preview h3 { font-size: 1rem; color: #ccc; margin: 18px 0 6px; }
+    #markdown-preview p { margin-bottom: 12px; }
+    #markdown-preview ul, #markdown-preview ol { padding-left: 22px; margin-bottom: 12px; }
+    #markdown-preview li { margin-bottom: 4px; }
+    #markdown-preview a { color: var(--accent); }
+    #markdown-preview table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 0.85rem; }
+    #markdown-preview th, #markdown-preview td { border: 1px solid var(--border); padding: 7px 12px; }
+    #markdown-preview th { background: var(--surface); color: #fff; }
+    #markdown-preview hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+    #markdown-preview code { background: #1c2128; padding: 2px 5px; border-radius: 4px; font-size: 0.85em; }
+    #markdown-preview em { color: var(--text-dim); font-size: 0.87em; }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #status-bar {
+      display: flex;
+      align-items: center;
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      margin-top: 10px;
+      min-height: 22px;
+    }
+
+    .examples {
+      margin-top: 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .example-chip {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 5px 12px;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .example-chip:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Autonomous Research Agent</h1>
+  <p>Type a query — the AI will plan, research, synthesize, and generate a full report.</p>
+</header>
+
+<div class="card">
+  <div class="input-row">
+    <input
+      id="query-input"
+      type="text"
+      placeholder="e.g. What are the tradeoffs between microservices and monoliths?"
+    />
+    <button id="research-btn">Research</button>
+  </div>
+
+  <div class="examples">
+    <span class="example-chip">Impact of LLMs on software development</span>
+    <span class="example-chip">Pros and cons of nuclear energy</span>
+    <span class="example-chip">State of quantum computing in 2024</span>
+    <span class="example-chip">Best practices for RAG systems</span>
+  </div>
+
+  <div id="status-bar"></div>
+
+  <div id="progress-section">
+    <h3>Progress</h3>
+    <div id="log"></div>
+  </div>
+
+  <div id="subquestions-section">
+    <h3>Research Plan</h3>
+    <div id="subquestions-list"></div>
+  </div>
+
+  <div id="result-section">
+    <h3>Report</h3>
+    <div class="download-row">
+      <a id="dl-md" class="dl-btn md" href="#" download>&#x1F4C4; Download Markdown</a>
+      <a id="dl-pdf" class="dl-btn pdf" href="#" download>&#x1F4CB; Download PDF</a>
+    </div>
+    <div id="markdown-preview"></div>
+  </div>
+</div>
+
+<script>
+  const queryInput = document.getElementById('query-input');
+  const researchBtn = document.getElementById('research-btn');
+  const logEl = document.getElementById('log');
+  const progressSection = document.getElementById('progress-section');
+  const subqSection = document.getElementById('subquestions-section');
+  const subqList = document.getElementById('subquestions-list');
+  const resultSection = document.getElementById('result-section');
+  const markdownPreview = document.getElementById('markdown-preview');
+  const dlMd = document.getElementById('dl-md');
+  const dlPdf = document.getElementById('dl-pdf');
+  const statusBar = document.getElementById('status-bar');
+
+  let currentSSE = null;
+  let subquestions = [];
+  let researchedCount = 0;
+
+  document.querySelectorAll('.example-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      queryInput.value = chip.textContent.trim();
+      queryInput.focus();
+    });
+  });
+
+  researchBtn.addEventListener('click', startResearch);
+  queryInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') startResearch();
+  });
+
+  function reset() {
+    logEl.innerHTML = '';
+    subqList.innerHTML = '';
+    markdownPreview.innerHTML = '';
+    progressSection.style.display = 'none';
+    subqSection.style.display = 'none';
+    resultSection.style.display = 'none';
+    statusBar.innerHTML = '';
+    subquestions = [];
+    researchedCount = 0;
+  }
+
+  function addLog(message, type = 'info') {
+    const line = document.createElement('div');
+    line.className = `log-line ${type}`;
+    line.innerHTML = `<span class="log-icon"></span><span>${escapeHtml(message)}</span>`;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function renderSubquestions(qs) {
+    subqList.innerHTML = '';
+    subquestions = qs;
+    qs.forEach((q, i) => {
+      const item = document.createElement('div');
+      item.className = 'subq-item';
+      item.id = `subq-${i}`;
+      item.innerHTML = `<span class="subq-num">${i + 1}</span><span>${escapeHtml(q)}</span><span class="subq-status">pending</span>`;
+      subqList.appendChild(item);
+    });
+    subqSection.style.display = 'block';
+  }
+
+  function markSubqResearching(index) {
+    const el = document.getElementById(`subq-${index}`);
+    if (el) {
+      el.classList.add('researching');
+      el.querySelector('.subq-status').textContent = 'researching…';
+    }
+  }
+
+  function markSubqDone(index) {
+    const el = document.getElementById(`subq-${index}`);
+    if (el) {
+      el.classList.remove('researching');
+      el.classList.add('done');
+      el.querySelector('.subq-status').textContent = 'done';
+    }
+  }
+
+  function setStatus(html) {
+    statusBar.innerHTML = html;
+  }
+
+  async function startResearch() {
+    const query = queryInput.value.trim();
+    if (!query) {
+      queryInput.focus();
+      return;
+    }
+
+    if (currentSSE) { currentSSE.close(); }
+    reset();
+
+    researchBtn.disabled = true;
+    setStatus(`<span class="spinner"></span> Starting research…`);
+    progressSection.style.display = 'block';
+
+    const url = `http://localhost:8000/research`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+
+      if (!response.ok) {
+        addLog(`Server error: ${response.status} ${response.statusText}`, 'error');
+        setStatus('');
+        researchBtn.disabled = false;
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const raw = line.slice(6).trim();
+            if (!raw) continue;
+            try {
+              handleEvent(JSON.parse(raw));
+            } catch (e) {
+              // ignore parse errors
+            }
+          }
+        }
+      }
+
+    } catch (err) {
+      addLog(`Connection error: ${err.message}. Is the backend running on port 8000?`, 'error');
+      setStatus('');
+      researchBtn.disabled = false;
+    }
+  }
+
+  function handleEvent(data) {
+    const msg = data.message || '';
+
+    if (data.error) {
+      addLog(msg, 'error');
+      setStatus('');
+      researchBtn.disabled = false;
+      return;
+    }
+
+    if (data.done) {
+      addLog('Report generated successfully.', 'done');
+      setStatus('');
+      researchBtn.disabled = false;
+
+      if (data.markdown_file) {
+        dlMd.href = `http://localhost:8000/download/${encodeURIComponent(data.markdown_file)}`;
+        dlMd.setAttribute('download', data.markdown_file);
+      }
+      if (data.pdf_file) {
+        dlPdf.href = `http://localhost:8000/download/${encodeURIComponent(data.pdf_file)}`;
+        dlPdf.setAttribute('download', data.pdf_file);
+      }
+      if (data.markdown_content) {
+        markdownPreview.innerHTML = marked.parse(data.markdown_content);
+      }
+      resultSection.style.display = 'block';
+      resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    // Track subquestion progress
+    if (data.subquestions) {
+      renderSubquestions(data.subquestions);
+      addLog(msg, 'done');
+      setStatus(`<span class="spinner"></span> Researching…`);
+      return;
+    }
+
+    const researchMatch = msg.match(/Researching subquestion (\d+)\/(\d+)/);
+    if (researchMatch) {
+      const idx = parseInt(researchMatch[1], 10) - 1;
+      // Mark previous as done
+      if (idx > 0) markSubqDone(idx - 1);
+      markSubqResearching(idx);
+      researchedCount = idx;
+      addLog(msg, 'running');
+      setStatus(`<span class="spinner"></span> ${escapeHtml(msg)}`);
+      return;
+    }
+
+    if (msg.startsWith('Synthesizing')) {
+      // Mark last subquestion done
+      if (subquestions.length > 0) markSubqDone(subquestions.length - 1);
+      addLog(msg, 'running');
+      setStatus(`<span class="spinner"></span> ${escapeHtml(msg)}`);
+      return;
+    }
+
+    if (msg.startsWith('Generating')) {
+      addLog(msg, 'running');
+      setStatus(`<span class="spinner"></span> ${escapeHtml(msg)}`);
+      return;
+    }
+
+    addLog(msg, 'info');
+    setStatus(`<span class="spinner"></span> ${escapeHtml(msg)}`);
+  }
+</script>
+</body>
+</html>

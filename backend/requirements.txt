@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+httpx
+beautifulsoup4
+duckduckgo_search
+weasyprint
+markdown
+pydantic
+python-multipart
+sse-starlette
