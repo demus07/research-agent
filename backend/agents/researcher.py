@@ -1,29 +1,16 @@
 import asyncio
 import os
 import re
-import time
 import httpx
-from bs4 import BeautifulSoup
-from googlesearch import search as google_search
+from tavily import TavilyClient
 
 from backend.models import ResearchFinding, Source
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 MODEL = os.getenv("MODEL", "qwen2.5:7b")
 
-MAX_CONTENT_CHARS = 1500
 RESULTS_PER_QUERY = 3
-SCRAPE_TIMEOUT = 15.0
-SEARCH_DELAY = 2.5
-FETCH_EXTRA = 4
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    )
-}
+SEARCH_DELAY = 1.0
 
 _BLOCKED_DOMAINS = {
     "instagram.com", "facebook.com", "twitter.com", "x.com",
@@ -36,14 +23,33 @@ _BLOCKED_DOMAINS = {
 }
 
 
-def _search_web(query: str, max_results: int = RESULTS_PER_QUERY + FETCH_EXTRA) -> list[dict]:
-    results = []
+def _get_tavily_client() -> TavilyClient:
+    api_key = os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        raise RuntimeError("TAVILY_API_KEY is not set. Add it to your .env file.")
+    return TavilyClient(api_key=api_key)
+
+
+def _search_web(query: str, max_results: int = RESULTS_PER_QUERY + 2) -> list[dict]:
+    client = _get_tavily_client()
+    response = client.search(query, max_results=max_results, search_depth="basic")
+    return [
+        {
+            "href": r["url"],
+            "title": r.get("title", r["url"]),
+            "body": r.get("content", ""),
+        }
+        for r in response.get("results", [])
+    ]
+
+
+def _is_blocked(url: str) -> bool:
     try:
-        for url in google_search(query, num_results=max_results, lang="en", sleep_interval=1):
-            results.append({"href": url, "title": "", "body": ""})
+        from urllib.parse import urlparse
+        host = urlparse(url).netloc.lower().lstrip("www.")
+        return any(host == d or host.endswith("." + d) for d in _BLOCKED_DOMAINS)
     except Exception:
-        pass
-    return results
+        return False
 
 
 class ResearcherAgent:
@@ -64,23 +70,17 @@ class ResearcherAgent:
         search_query = await self._to_search_query(subquestion)
         results = _search_web(search_query)
         sources = []
-        async with httpx.AsyncClient(
-            timeout=SCRAPE_TIMEOUT,
-            follow_redirects=True,
-            headers=HEADERS,
-        ) as client:
-            for result in results:
-                if len(sources) >= RESULTS_PER_QUERY:
-                    break
-                url = result.get("href", "")
-                if not url or self._is_blocked(url) or not self._has_content_path(url):
-                    continue
-                title, content = await self._scrape(client, url)
-                if not content:
-                    continue
-                if len(title) < 25:
-                    continue
-                sources.append(Source(url=url, title=title, content=content))
+        for result in results:
+            if len(sources) >= RESULTS_PER_QUERY:
+                break
+            url = result.get("href", "")
+            title = result.get("title", "")
+            content = result.get("body", "")
+            if not url or _is_blocked(url):
+                continue
+            if not content:
+                continue
+            sources.append(Source(url=url, title=title, content=content))
         return sources
 
     async def _to_search_query(self, subquestion: str) -> str:
@@ -103,42 +103,6 @@ class ResearcherAgent:
         except Exception:
             pass
         return _clean_query(subquestion)
-
-    def _is_blocked(self, url: str) -> bool:
-        try:
-            from urllib.parse import urlparse
-            host = urlparse(url).netloc.lower().lstrip("www.")
-            return any(host == d or host.endswith("." + d) for d in _BLOCKED_DOMAINS)
-        except Exception:
-            return False
-
-    def _has_content_path(self, url: str) -> bool:
-        try:
-            from urllib.parse import urlparse
-            path = urlparse(url).path.rstrip("/")
-            return len(path) > 1
-        except Exception:
-            return True
-
-    async def _scrape(self, client: httpx.AsyncClient, url: str) -> tuple[str, str]:
-        try:
-            response = await client.get(url)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, "html.parser")
-            # title from <title> tag
-            title_tag = soup.find("title")
-            title = title_tag.get_text(strip=True) if title_tag else url
-            # clean up common title suffixes like " | Site Name"
-            title = re.split(r"\s[\|\-—]\s", title)[0].strip()
-            # content from <p> tags
-            for tag in soup(["script", "style", "nav", "footer", "header"]):
-                tag.decompose()
-            paragraphs = soup.find_all("p")
-            text = " ".join(p.get_text(separator=" ", strip=True) for p in paragraphs)
-            text = " ".join(text.split())
-            return title, text[:MAX_CONTENT_CHARS]
-        except Exception:
-            return url, ""
 
 
 # Fallback query cleaner used when Ollama call fails

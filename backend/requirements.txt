@@ -2,7 +2,8 @@ fastapi
 uvicorn
 httpx
 beautifulsoup4
-googlesearch-python
+tavily-python
+python-dotenv
 fpdf2
 markdown
 pydantic
