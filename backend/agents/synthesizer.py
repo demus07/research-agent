@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import httpx
 
 from backend.models import ResearchFinding
@@ -17,37 +18,26 @@ class SynthesizerAgent:
     async def synthesize(self, findings: list[ResearchFinding]) -> dict:
         research_text = self._format_findings(findings)
 
-        prompt = f"""You are a research synthesis expert. Analyze the following research findings and produce a structured synthesis.
+        prompt = f"""You are a research synthesizer. Output ONLY a valid JSON object — no markdown, no explanation, no code fences.
 
-RESEARCH FINDINGS:
+Use exactly these keys:
+- "executive_summary": one paragraph string
+- "key_findings": array of 3-5 short strings
+- "sections": array of objects, each with "subquestion" (string) and "analysis" (string)
+- "tradeoffs": array of short strings (can be empty array)
+- "conclusion": one paragraph string
+- "comparison_table": array of objects with "aspect" and "details" keys (can be empty array)
+
+RESEARCH DATA:
 {research_text}
 
-Produce a thorough synthesis in valid JSON format. Respond ONLY with the JSON object, no preamble or explanation:
-{{
-  "executive_summary": "2-3 sentence overview of the entire research topic",
-  "key_findings": ["finding 1", "finding 2", "finding 3", "finding 4"],
-  "sections": [
-    {{
-      "subquestion": "the subquestion",
-      "analysis": "detailed 2-4 paragraph analysis for this subquestion based on the sources"
-    }}
-  ],
-  "tradeoffs": ["tradeoff or comparison point 1", "tradeoff 2", "tradeoff 3"],
-  "conclusion": "3-5 sentence conclusion synthesizing everything",
-  "comparison_table": [
-    {{"aspect": "aspect name", "details": "comparison details"}}
-  ]
-}}"""
+JSON output (start with {{ and end with }}):"""
 
         async with httpx.AsyncClient(timeout=180.0) as client:
             try:
                 response = await client.post(
                     f"{self.ollama_url}/api/generate",
-                    json={
-                        "model": self.model,
-                        "prompt": prompt,
-                        "stream": False,
-                    },
+                    json={"model": self.model, "prompt": prompt, "stream": False},
                 )
                 response.raise_for_status()
             except httpx.ConnectError:
@@ -74,17 +64,28 @@ Produce a thorough synthesis in valid JSON format. Respond ONLY with the JSON ob
         return "\n".join(parts)
 
     def _parse_synthesis(self, raw: str, findings: list[ResearchFinding]) -> dict:
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        if start != -1 and end > start:
+        # strip markdown code fences if model wrapped output
+        cleaned = re.sub(r"```json|```", "", raw).strip()
+
+        # attempt 1: parse the whole cleaned string
+        try:
+            parsed = json.loads(cleaned)
+            if "conclusion" in parsed:
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        # attempt 2: extract first {...} block (handles preamble/postamble text)
+        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if match:
             try:
-                parsed = json.loads(raw[start:end])
-                if "sections" in parsed and "conclusion" in parsed:
+                parsed = json.loads(match.group())
+                if "conclusion" in parsed:
                     return parsed
             except json.JSONDecodeError:
                 pass
 
-        # Fallback: build a basic structure from findings
+        # fallback: build structure from raw findings
         sections = []
         for finding in findings:
             combined = " ".join(s.content for s in finding.sources if s.content)
@@ -94,10 +95,10 @@ Produce a thorough synthesis in valid JSON format. Respond ONLY with the JSON ob
             })
 
         return {
-            "executive_summary": "Research synthesis could not be fully parsed from the model response.",
+            "executive_summary": raw[:300] if raw else "Synthesis unavailable.",
             "key_findings": ["See individual sections for details."],
             "sections": sections,
             "tradeoffs": [],
-            "conclusion": raw[:500] if raw else "No synthesis available.",
+            "conclusion": raw[300:800] if len(raw) > 300 else "See executive summary.",
             "comparison_table": [],
         }

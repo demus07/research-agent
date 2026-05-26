@@ -435,7 +435,7 @@
     setStatus(`<span class="spinner"></span> Starting research…`);
     progressSection.style.display = 'block';
 
-    const url = `http://localhost:8000/research`;
+    const url = `http://localhost:8002/research`;
 
     try {
       const response = await fetch(url, {
@@ -499,11 +499,11 @@
       researchBtn.disabled = false;
 
       if (data.markdown_file) {
-        dlMd.href = `http://localhost:8000/download/${encodeURIComponent(data.markdown_file)}`;
+        dlMd.href = `http://localhost:8002/download/${encodeURIComponent(data.markdown_file)}`;
         dlMd.setAttribute('download', data.markdown_file);
       }
       if (data.pdf_file) {
-        dlPdf.href = `http://localhost:8000/download/${encodeURIComponent(data.pdf_file)}`;
+        dlPdf.href = `http://localhost:8002/download/${encodeURIComponent(data.pdf_file)}`;
         dlPdf.setAttribute('download', data.pdf_file);
       }
       if (data.markdown_content) {
