@@ -16,11 +16,14 @@ SCRAPE_TIMEOUT = 15.0
 SEARCH_DELAY = 2.5
 FETCH_EXTRA = 4  # extra DDG results to try when scraping yields empty content
 
-# Domains that reliably return login walls or zero useful text
+# Domains blocked at the DDG-result stage (before even fetching)
 _BLOCKED_DOMAINS = {
+    # login walls / zero scrapable content
     "instagram.com", "facebook.com", "twitter.com", "x.com",
     "tiktok.com", "linkedin.com", "pinterest.com", "snapchat.com",
     "reddit.com", "quora.com",
+    # app stores and video platforms — no article text
+    "apps.apple.com", "play.google.com", "youtube.com", "vimeo.com",
 }
 
 HEADERS = {
@@ -60,7 +63,7 @@ class ResearcherAgent:
                     break
                 url = result.get("href", "")
                 title = result.get("title", "No title")
-                if not url or self._is_blocked(url):
+                if not url or self._is_blocked(url) or len(title) < 20:
                     continue
                 content = await self._scrape(client, url)
                 if not content:
