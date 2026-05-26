@@ -1,10 +1,14 @@
 import asyncio
+import os
 import re
 import httpx
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 
 from backend.models import ResearchFinding, Source
+
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+MODEL = os.getenv("MODEL", "llama3")
 
 MAX_CONTENT_CHARS = 1500
 RESULTS_PER_QUERY = 3
@@ -19,32 +23,12 @@ HEADERS = {
     )
 }
 
-# Question words and auxiliaries that make terrible DDG search terms
-_QUESTION_PREFIX = re.compile(
-    r"^(what|how|why|when|where|who|which|can|could|should|would|will|does|do|is|are|has|have)\s+",
-    re.IGNORECASE,
-)
-_FILLER = re.compile(
-    r"\b(please|effectively|efficiently|successfully|organizations|companies|businesses|be implemented|be integrated|be used)\b",
-    re.IGNORECASE,
-)
-
-
-def _clean_query(subquestion: str) -> str:
-    q = subquestion.strip().rstrip("?")
-    # strip leading question/aux words repeatedly until none remain
-    prev = None
-    while prev != q:
-        prev = q
-        q = _QUESTION_PREFIX.sub("", q).strip()
-    q = _FILLER.sub("", q)
-    # collapse whitespace
-    q = re.sub(r"^(the|a|an)\s+", "", q, flags=re.IGNORECASE)
-    q = " ".join(q.split())
-    return q or subquestion  # fall back to original if we wiped everything
-
 
 class ResearcherAgent:
+    def __init__(self):
+        self.model = MODEL
+        self.ollama_url = OLLAMA_URL
+
     async def research(self, subquestions: list[str]) -> list[ResearchFinding]:
         findings = []
         for i, subquestion in enumerate(subquestions):
@@ -55,7 +39,7 @@ class ResearcherAgent:
         return findings
 
     async def _research_subquestion(self, subquestion: str) -> list[Source]:
-        search_query = _clean_query(subquestion)
+        search_query = await self._to_search_query(subquestion)
         results = self._search(search_query)
         sources = []
         async with httpx.AsyncClient(
@@ -71,6 +55,29 @@ class ResearcherAgent:
                 content = await self._scrape(client, url)
                 sources.append(Source(url=url, title=title, content=content))
         return sources
+
+    async def _to_search_query(self, subquestion: str) -> str:
+        prompt = (
+            "Convert this research question into a short Google search query "
+            "(4-6 words max, no punctuation). Return only the search query, "
+            f"nothing else: {subquestion}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.ollama_url}/api/generate",
+                    json={"model": self.model, "prompt": prompt, "stream": False},
+                )
+                response.raise_for_status()
+                raw = response.json().get("response", "").strip()
+                # keep only the first line and strip punctuation/quotes
+                query = raw.splitlines()[0].strip().strip('"').strip("'").strip(".")
+                if query and len(query.split()) <= 10:
+                    return query
+        except Exception:
+            pass
+        # fallback: strip question words manually
+        return _clean_query(subquestion)
 
     def _search(self, query: str, retries: int = 2) -> list[dict]:
         for attempt in range(retries + 1):
@@ -99,3 +106,26 @@ class ResearcherAgent:
             return text[:MAX_CONTENT_CHARS]
         except Exception:
             return ""
+
+
+# Fallback query cleaner used when Ollama call fails
+_QUESTION_PREFIX = re.compile(
+    r"^(what|how|why|when|where|who|which|can|could|should|would|will|does|do|is|are|has|have)\s+",
+    re.IGNORECASE,
+)
+_FILLER = re.compile(
+    r"\b(please|effectively|efficiently|successfully|organizations|companies|businesses|be implemented|be integrated|be used)\b",
+    re.IGNORECASE,
+)
+
+
+def _clean_query(subquestion: str) -> str:
+    q = subquestion.strip().rstrip("?")
+    prev = None
+    while prev != q:
+        prev = q
+        q = _QUESTION_PREFIX.sub("", q).strip()
+    q = _FILLER.sub("", q)
+    q = re.sub(r"^(the|a|an)\s+", "", q, flags=re.IGNORECASE)
+    q = " ".join(q.split())
+    return q or subquestion
