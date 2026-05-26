@@ -4,7 +4,7 @@ import httpx
 
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-MODEL = os.getenv("MODEL", "llama3")
+MODEL = os.getenv("MODEL", "qwen2.5:7b")
 
 
 class PlannerAgent:
@@ -20,6 +20,7 @@ Rules:
 - Questions should read like a research outline, not web search queries
 - They should be broad enough to find multiple sources, but focused on one aspect
 - Use natural research question phrasing: "What content types...", "How to...", "Which strategies..."
+- NEVER ask for ranked lists of specific people, follower counts, or named influencers — these cannot be answered via web scraping. Instead rephrase as characteristics or patterns: not "Who are the top 5 fitness influencers" but "What content style do leading fitness Instagram accounts use"
 
 Example for "grow Instagram personal brand":
 - "What content types drive follower growth on Instagram"

@@ -7,7 +7,7 @@ from backend.models import ResearchFinding
 
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-MODEL = os.getenv("MODEL", "llama3")
+MODEL = os.getenv("MODEL", "qwen2.5:7b")
 
 
 class SynthesizerAgent:

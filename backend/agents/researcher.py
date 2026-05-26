@@ -8,7 +8,7 @@ from duckduckgo_search import DDGS
 from backend.models import ResearchFinding, Source
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-MODEL = os.getenv("MODEL", "llama3")
+MODEL = os.getenv("MODEL", "qwen2.5:7b")
 
 MAX_CONTENT_CHARS = 1500
 RESULTS_PER_QUERY = 3
@@ -22,8 +22,14 @@ _BLOCKED_DOMAINS = {
     "instagram.com", "facebook.com", "twitter.com", "x.com",
     "tiktok.com", "linkedin.com", "pinterest.com", "snapchat.com",
     "reddit.com", "quora.com",
-    # app stores and video platforms — no article text
+    # app stores and video platforms
     "apps.apple.com", "play.google.com", "youtube.com", "vimeo.com",
+    # dictionaries and reference sites (match individual words in URL)
+    "merriam-webster.com", "dictionary.com", "cambridge.org",
+    # e-commerce
+    "amazon.com", "amazon.in", "flipkart.com",
+    # Indian news/entertainment (return region-locked or low-quality content)
+    "jio.com", "hotstar.com", "indiatimes.com", "ndtv.com", "timesofindia.com",
 }
 
 HEADERS = {
@@ -63,7 +69,11 @@ class ResearcherAgent:
                     break
                 url = result.get("href", "")
                 title = result.get("title", "No title")
-                if not url or self._is_blocked(url) or len(title) < 20:
+                if not url or self._is_blocked(url):
+                    continue
+                if len(title) < 25:
+                    continue
+                if not self._has_content_path(url):
                     continue
                 content = await self._scrape(client, url)
                 if not content:
@@ -78,6 +88,15 @@ class ResearcherAgent:
             return any(host == d or host.endswith("." + d) for d in _BLOCKED_DOMAINS)
         except Exception:
             return False
+
+    def _has_content_path(self, url: str) -> bool:
+        """Return False for bare homepages (path is empty, '/', or just query params)."""
+        try:
+            from urllib.parse import urlparse
+            path = urlparse(url).path.rstrip("/")
+            return len(path) > 1
+        except Exception:
+            return True
 
     async def _to_search_query(self, subquestion: str) -> str:
         prompt = (
@@ -106,7 +125,12 @@ class ResearcherAgent:
         for attempt in range(retries + 1):
             try:
                 with DDGS() as ddgs:
-                    results = list(ddgs.text(query, max_results=RESULTS_PER_QUERY + FETCH_EXTRA))
+                    results = list(ddgs.text(
+                    query,
+                    max_results=RESULTS_PER_QUERY + FETCH_EXTRA,
+                    region="us-en",
+                    safesearch="off",
+                ))
                 if results:
                     return results
             except Exception:
