@@ -16,6 +16,15 @@ FONT_ITALIC = str(FONT_DIR / "Arial Italic.ttf")
 FONT_BOLD_ITALIC = str(FONT_DIR / "Arial Bold Italic.ttf")
 
 
+def _s(val) -> str:
+    """Coerce any synthesis field value to a plain string."""
+    if val is None:
+        return ""
+    if isinstance(val, list):
+        return " ".join(str(v) for v in val)
+    return str(val)
+
+
 class WriterAgent:
     def __init__(self):
         OUTPUTS_DIR.mkdir(exist_ok=True)
@@ -59,13 +68,13 @@ class WriterAgent:
         lines.append("---\n")
 
         lines.append("## Executive Summary\n")
-        lines.append(synthesis.get("executive_summary", "") + "\n")
+        lines.append(_s(synthesis.get("executive_summary")) + "\n")
 
         key_findings = synthesis.get("key_findings", [])
         if key_findings:
             lines.append("## Key Findings\n")
             for kf in key_findings:
-                lines.append(f"- {kf}")
+                lines.append(f"- {_s(kf)}")
             lines.append("")
 
         # build lookup: subquestion → sources (match by position for robustness)
@@ -75,8 +84,8 @@ class WriterAgent:
         if sections:
             lines.append("## Detailed Analysis\n")
             for i, section in enumerate(sections):
-                lines.append(f"### {section.get('subquestion', '')}\n")
-                lines.append(section.get("analysis", "") + "\n")
+                lines.append(f"### {_s(section.get('subquestion'))}\n")
+                lines.append(_s(section.get("analysis")) + "\n")
                 # inline citations for this section
                 sources = (findings_by_index.get(i, None) or None)
                 if sources and sources.sources:
@@ -90,7 +99,7 @@ class WriterAgent:
         if tradeoffs:
             lines.append("## Tradeoffs & Comparisons\n")
             for t in tradeoffs:
-                lines.append(f"- {t}")
+                lines.append(f"- {_s(t)}")
             lines.append("")
 
         table_rows = synthesis.get("comparison_table", [])
@@ -99,15 +108,15 @@ class WriterAgent:
             lines.append("| Aspect | Details |")
             lines.append("|--------|---------|")
             for row in table_rows:
-                aspect = row.get("aspect", "").replace("|", "\\|")
-                details = row.get("details", "").replace("|", "\\|")
+                aspect = _s(row.get("aspect")).replace("|", "\\|")
+                details = _s(row.get("details")).replace("|", "\\|")
                 lines.append(f"| {aspect} | {details} |")
             lines.append("")
 
         conclusion = synthesis.get("conclusion", "")
         if conclusion:
             lines.append("## Conclusion\n")
-            lines.append(conclusion + "\n")
+            lines.append(_s(conclusion) + "\n")
 
         lines.append("## Sources\n")
         source_num = 1
@@ -197,7 +206,7 @@ class WriterAgent:
         pdf.set_text_color(0, 0, 0)
 
         # Executive Summary
-        exec_summary = synthesis.get("executive_summary", "")
+        exec_summary = _s(synthesis.get("executive_summary"))
         if exec_summary:
             add_h2("Executive Summary")
             add_body(exec_summary)
@@ -207,7 +216,7 @@ class WriterAgent:
         if key_findings:
             add_h2("Key Findings")
             for kf in key_findings:
-                add_bullet(kf)
+                add_bullet(_s(kf))
             pdf.ln(2)
 
         # Detailed Analysis
@@ -216,8 +225,8 @@ class WriterAgent:
         if sections:
             add_h2("Detailed Analysis")
             for i, section in enumerate(sections):
-                add_h3(section.get("subquestion", ""))
-                add_body(section.get("analysis", ""))
+                add_h3(_s(section.get("subquestion")))
+                add_body(_s(section.get("analysis")))
                 # inline citations
                 finding = findings_by_index.get(i)
                 if finding and finding.sources:
@@ -235,7 +244,7 @@ class WriterAgent:
         if tradeoffs:
             add_h2("Tradeoffs & Comparisons")
             for t in tradeoffs:
-                add_bullet(t)
+                add_bullet(_s(t))
             pdf.ln(2)
 
         # Comparison Table
@@ -250,13 +259,13 @@ class WriterAgent:
             pdf.ln()
             pdf.set_font("Arial", "", 9)
             for row in table_rows:
-                pdf.cell(col_w[0], 7, str(row.get("aspect", ""))[:50], border=1)
-                pdf.cell(col_w[1], 7, str(row.get("details", ""))[:90], border=1)
+                pdf.cell(col_w[0], 7, _s(row.get("aspect"))[:50], border=1)
+                pdf.cell(col_w[1], 7, _s(row.get("details"))[:90], border=1)
                 pdf.ln()
             pdf.ln(4)
 
         # Conclusion
-        conclusion = synthesis.get("conclusion", "")
+        conclusion = _s(synthesis.get("conclusion"))
         if conclusion:
             add_h2("Conclusion")
             add_body(conclusion)
