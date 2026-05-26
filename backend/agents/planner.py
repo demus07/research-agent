@@ -13,17 +13,24 @@ class PlannerAgent:
         self.ollama_url = OLLAMA_URL
 
     async def plan(self, query: str) -> list[str]:
-        prompt = f"""You are a research planning assistant. Given a research query, break it down into 4-6 focused subquestions that together would provide comprehensive coverage of the topic.
+        prompt = f"""You are a research planning assistant. Given a research query, generate 4-6 specific, searchable subtopics that together cover the topic comprehensively.
+
+Rules:
+- Each subtopic must be a concrete, specific phrase — NOT an abstract question
+- Write them like Google search queries a journalist would type, not academic questions
+- Include specifics: tactics, comparisons, examples, tools, stats, trends
+- BAD: "What are the key components of X?" or "How can organizations achieve Y?"
+- GOOD: "Instagram personal brand growth tactics 2025" or "RAG vs fine-tuning LLM tradeoffs"
 
 Research query: {query}
 
 Respond ONLY with a valid JSON object in this exact format, no other text:
 {{
   "subquestions": [
-    "subquestion 1",
-    "subquestion 2",
-    "subquestion 3",
-    "subquestion 4"
+    "specific searchable subtopic 1",
+    "specific searchable subtopic 2",
+    "specific searchable subtopic 3",
+    "specific searchable subtopic 4"
   ]
 }}"""
 

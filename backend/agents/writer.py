@@ -68,12 +68,23 @@ class WriterAgent:
                 lines.append(f"- {kf}")
             lines.append("")
 
+        # build lookup: subquestion → sources (match by position for robustness)
+        findings_by_index = {i: f for i, f in enumerate(findings)}
+
         sections = synthesis.get("sections", [])
         if sections:
             lines.append("## Detailed Analysis\n")
-            for section in sections:
+            for i, section in enumerate(sections):
                 lines.append(f"### {section.get('subquestion', '')}\n")
                 lines.append(section.get("analysis", "") + "\n")
+                # inline citations for this section
+                sources = (findings_by_index.get(i, None) or None)
+                if sources and sources.sources:
+                    cite_links = " · ".join(
+                        f"[{s.title}]({s.url})" for s in sources.sources if s.url
+                    )
+                    if cite_links:
+                        lines.append(f"*Sources: {cite_links}*\n")
 
         tradeoffs = synthesis.get("tradeoffs", [])
         if tradeoffs:
@@ -200,12 +211,24 @@ class WriterAgent:
             pdf.ln(2)
 
         # Detailed Analysis
+        findings_by_index = {i: f for i, f in enumerate(findings)}
         sections = synthesis.get("sections", [])
         if sections:
             add_h2("Detailed Analysis")
-            for section in sections:
+            for i, section in enumerate(sections):
                 add_h3(section.get("subquestion", ""))
                 add_body(section.get("analysis", ""))
+                # inline citations
+                finding = findings_by_index.get(i)
+                if finding and finding.sources:
+                    pdf.set_font("Arial", "I", 8)
+                    pdf.set_text_color(80, 80, 80)
+                    for s in finding.sources:
+                        if s.url:
+                            pdf.set_x(25)
+                            pdf.multi_cell(165, 5, f"• {s.title} — {s.url}")
+                    pdf.ln(2)
+                    pdf.set_text_color(0, 0, 0)
 
         # Tradeoffs
         tradeoffs = synthesis.get("tradeoffs", [])
