@@ -14,6 +14,14 @@ MAX_CONTENT_CHARS = 1500
 RESULTS_PER_QUERY = 3
 SCRAPE_TIMEOUT = 15.0
 SEARCH_DELAY = 2.5
+FETCH_EXTRA = 4  # extra DDG results to try when scraping yields empty content
+
+# Domains that reliably return login walls or zero useful text
+_BLOCKED_DOMAINS = {
+    "instagram.com", "facebook.com", "twitter.com", "x.com",
+    "tiktok.com", "linkedin.com", "pinterest.com", "snapchat.com",
+    "reddit.com", "quora.com",
+}
 
 HEADERS = {
     "User-Agent": (
@@ -47,14 +55,26 @@ class ResearcherAgent:
             follow_redirects=True,
             headers=HEADERS,
         ) as client:
-            for result in results[:RESULTS_PER_QUERY]:
+            for result in results:
+                if len(sources) >= RESULTS_PER_QUERY:
+                    break
                 url = result.get("href", "")
                 title = result.get("title", "No title")
-                if not url:
+                if not url or self._is_blocked(url):
                     continue
                 content = await self._scrape(client, url)
+                if not content:
+                    continue  # skip pages that yielded nothing (login walls, JS-only sites)
                 sources.append(Source(url=url, title=title, content=content))
         return sources
+
+    def _is_blocked(self, url: str) -> bool:
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(url).netloc.lower().lstrip("www.")
+            return any(host == d or host.endswith("." + d) for d in _BLOCKED_DOMAINS)
+        except Exception:
+            return False
 
     async def _to_search_query(self, subquestion: str) -> str:
         prompt = (
@@ -83,7 +103,7 @@ class ResearcherAgent:
         for attempt in range(retries + 1):
             try:
                 with DDGS() as ddgs:
-                    results = list(ddgs.text(query, max_results=RESULTS_PER_QUERY + 2))
+                    results = list(ddgs.text(query, max_results=RESULTS_PER_QUERY + FETCH_EXTRA))
                 if results:
                     return results
             except Exception:

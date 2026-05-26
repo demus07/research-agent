@@ -85,7 +85,38 @@ JSON output (start with {{ and end with }}):"""
             except json.JSONDecodeError:
                 pass
 
-        # fallback: build structure from raw findings
+        # attempt 3: JSON was truncated — rescue individual fields via regex
+        rescued = self._rescue_fields(cleaned, findings)
+        if rescued:
+            return rescued
+
+        # final fallback: build entirely from scraped content, no raw LLM text
+        return self._fallback_from_findings(findings)
+
+    def _rescue_fields(self, text: str, findings: list[ResearchFinding]) -> dict | None:
+        """Extract whatever fields are present from a truncated JSON string."""
+        if "{" not in text:
+            return None
+
+        def get_str(field: str) -> str:
+            m = re.search(rf'"{field}"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL)
+            return m.group(1).replace('\\"', '"').replace("\\n", "\n") if m else ""
+
+        def get_list(field: str) -> list[str]:
+            m = re.search(rf'"{field}"\s*:\s*\[(.*?)\]', text, re.DOTALL)
+            if not m:
+                return []
+            return [i.replace('\\"', '"') for i in re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1))]
+
+        summary = get_str("executive_summary")
+        conclusion = get_str("conclusion")
+        key_findings = get_list("key_findings")
+
+        # only use rescue if we got at least something meaningful
+        if not summary and not conclusion:
+            return None
+
+        # rebuild sections from findings if the sections field is unusable
         sections = []
         for finding in findings:
             combined = " ".join(s.content for s in finding.sources if s.content)
@@ -95,10 +126,32 @@ JSON output (start with {{ and end with }}):"""
             })
 
         return {
-            "executive_summary": raw[:300] if raw else "Synthesis unavailable.",
+            "executive_summary": summary or "See detailed sections below.",
+            "key_findings": key_findings or ["See individual sections for details."],
+            "sections": sections,
+            "tradeoffs": get_list("tradeoffs"),
+            "conclusion": conclusion or summary,
+            "comparison_table": [],
+        }
+
+    def _fallback_from_findings(self, findings: list[ResearchFinding]) -> dict:
+        """Build a plain synthesis directly from scraped content."""
+        sections = []
+        all_content = []
+        for finding in findings:
+            combined = " ".join(s.content for s in finding.sources if s.content)
+            all_content.append(combined)
+            sections.append({
+                "subquestion": finding.subquestion,
+                "analysis": combined[:600] if combined else "No data retrieved for this subquestion.",
+            })
+
+        summary = " ".join(all_content)[:300] if all_content else "No data was retrieved."
+        return {
+            "executive_summary": summary,
             "key_findings": ["See individual sections for details."],
             "sections": sections,
             "tradeoffs": [],
-            "conclusion": raw[300:800] if len(raw) > 300 else "See executive summary.",
+            "conclusion": "See the detailed analysis sections above for full findings.",
             "comparison_table": [],
         }
