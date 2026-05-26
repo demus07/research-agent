@@ -1,9 +1,10 @@
 import asyncio
 import os
 import re
+import time
 import httpx
 from bs4 import BeautifulSoup
-from duckduckgo_search import DDGS
+from googlesearch import search as google_search
 
 from backend.models import ResearchFinding, Source
 
@@ -14,23 +15,7 @@ MAX_CONTENT_CHARS = 1500
 RESULTS_PER_QUERY = 3
 SCRAPE_TIMEOUT = 15.0
 SEARCH_DELAY = 2.5
-FETCH_EXTRA = 4  # extra DDG results to try when scraping yields empty content
-
-# Domains blocked at the DDG-result stage (before even fetching)
-_BLOCKED_DOMAINS = {
-    # login walls / zero scrapable content
-    "instagram.com", "facebook.com", "twitter.com", "x.com",
-    "tiktok.com", "linkedin.com", "pinterest.com", "snapchat.com",
-    "reddit.com", "quora.com",
-    # app stores and video platforms
-    "apps.apple.com", "play.google.com", "youtube.com", "vimeo.com",
-    # dictionaries and reference sites (match individual words in URL)
-    "merriam-webster.com", "dictionary.com", "cambridge.org",
-    # e-commerce
-    "amazon.com", "amazon.in", "flipkart.com",
-    # Indian news/entertainment (return region-locked or low-quality content)
-    "jio.com", "hotstar.com", "indiatimes.com", "ndtv.com", "timesofindia.com",
-}
+FETCH_EXTRA = 4
 
 HEADERS = {
     "User-Agent": (
@@ -39,6 +24,26 @@ HEADERS = {
         "Chrome/120.0.0.0 Safari/537.36"
     )
 }
+
+_BLOCKED_DOMAINS = {
+    "instagram.com", "facebook.com", "twitter.com", "x.com",
+    "tiktok.com", "linkedin.com", "pinterest.com", "snapchat.com",
+    "reddit.com", "quora.com",
+    "apps.apple.com", "play.google.com", "youtube.com", "vimeo.com",
+    "merriam-webster.com", "dictionary.com", "cambridge.org",
+    "amazon.com", "amazon.in", "flipkart.com",
+    "jio.com", "hotstar.com", "indiatimes.com", "ndtv.com", "timesofindia.com",
+}
+
+
+def _search_web(query: str, max_results: int = RESULTS_PER_QUERY + FETCH_EXTRA) -> list[dict]:
+    results = []
+    try:
+        for url in google_search(query, num_results=max_results, lang="en", sleep_interval=1):
+            results.append({"href": url, "title": "", "body": ""})
+    except Exception:
+        pass
+    return results
 
 
 class ResearcherAgent:
@@ -57,7 +62,7 @@ class ResearcherAgent:
 
     async def _research_subquestion(self, subquestion: str) -> list[Source]:
         search_query = await self._to_search_query(subquestion)
-        results = self._search(search_query)
+        results = _search_web(search_query)
         sources = []
         async with httpx.AsyncClient(
             timeout=SCRAPE_TIMEOUT,
@@ -68,35 +73,15 @@ class ResearcherAgent:
                 if len(sources) >= RESULTS_PER_QUERY:
                     break
                 url = result.get("href", "")
-                title = result.get("title", "No title")
-                if not url or self._is_blocked(url):
+                if not url or self._is_blocked(url) or not self._has_content_path(url):
+                    continue
+                title, content = await self._scrape(client, url)
+                if not content:
                     continue
                 if len(title) < 25:
                     continue
-                if not self._has_content_path(url):
-                    continue
-                content = await self._scrape(client, url)
-                if not content:
-                    continue  # skip pages that yielded nothing (login walls, JS-only sites)
                 sources.append(Source(url=url, title=title, content=content))
         return sources
-
-    def _is_blocked(self, url: str) -> bool:
-        try:
-            from urllib.parse import urlparse
-            host = urlparse(url).netloc.lower().lstrip("www.")
-            return any(host == d or host.endswith("." + d) for d in _BLOCKED_DOMAINS)
-        except Exception:
-            return False
-
-    def _has_content_path(self, url: str) -> bool:
-        """Return False for bare homepages (path is empty, '/', or just query params)."""
-        try:
-            from urllib.parse import urlparse
-            path = urlparse(url).path.rstrip("/")
-            return len(path) > 1
-        except Exception:
-            return True
 
     async def _to_search_query(self, subquestion: str) -> str:
         prompt = (
@@ -112,47 +97,48 @@ class ResearcherAgent:
                 )
                 response.raise_for_status()
                 raw = response.json().get("response", "").strip()
-                # keep only the first line and strip punctuation/quotes
                 query = raw.splitlines()[0].strip().strip('"').strip("'").strip(".")
                 if query and len(query.split()) <= 10:
                     return query
         except Exception:
             pass
-        # fallback: strip question words manually
         return _clean_query(subquestion)
 
-    def _search(self, query: str, retries: int = 2) -> list[dict]:
-        for attempt in range(retries + 1):
-            try:
-                with DDGS() as ddgs:
-                    results = list(ddgs.text(
-                    query,
-                    max_results=RESULTS_PER_QUERY + FETCH_EXTRA,
-                    region="us-en",
-                    safesearch="off",
-                ))
-                if results:
-                    return results
-            except Exception:
-                pass
-            if attempt < retries:
-                import time
-                time.sleep(2.0)
-        return []
+    def _is_blocked(self, url: str) -> bool:
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(url).netloc.lower().lstrip("www.")
+            return any(host == d or host.endswith("." + d) for d in _BLOCKED_DOMAINS)
+        except Exception:
+            return False
 
-    async def _scrape(self, client: httpx.AsyncClient, url: str) -> str:
+    def _has_content_path(self, url: str) -> bool:
+        try:
+            from urllib.parse import urlparse
+            path = urlparse(url).path.rstrip("/")
+            return len(path) > 1
+        except Exception:
+            return True
+
+    async def _scrape(self, client: httpx.AsyncClient, url: str) -> tuple[str, str]:
         try:
             response = await client.get(url)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "html.parser")
+            # title from <title> tag
+            title_tag = soup.find("title")
+            title = title_tag.get_text(strip=True) if title_tag else url
+            # clean up common title suffixes like " | Site Name"
+            title = re.split(r"\s[\|\-—]\s", title)[0].strip()
+            # content from <p> tags
             for tag in soup(["script", "style", "nav", "footer", "header"]):
                 tag.decompose()
             paragraphs = soup.find_all("p")
             text = " ".join(p.get_text(separator=" ", strip=True) for p in paragraphs)
             text = " ".join(text.split())
-            return text[:MAX_CONTENT_CHARS]
+            return title, text[:MAX_CONTENT_CHARS]
         except Exception:
-            return ""
+            return url, ""
 
 
 # Fallback query cleaner used when Ollama call fails
